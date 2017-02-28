@@ -4,18 +4,23 @@ PREFIX		?=/usr/local
 LIB_OPTION	?= -shared 
 
 #Lua auto detect
-LUA_VERSION ?= $(shell pkg-config luajit --print-provides)
-ifeq ($(LUA_VERSION),)                         ############ Not use luajit
-LUAV		?= $(shell lua -e "_,_,v=string.find(_VERSION,'Lua (.+)');print(v)")
-LUA_CFLAGS	?= -I$(PREFIX)/include/lua$(LUAV)
-LUA_LIBS	?= -L$(PREFIX)/lib 
-LUA_LIBDIR	?= $(PREFIX)/lib/lua/$(LUAV)
-else
-LUAV		?= $(shell lua -e "_,_,v=string.find(_VERSION,'Lua (.+)');print(v)")
-LUA_CFLAGS	?= $(shell pkg-config luajit --cflags)
-LUA_LIBS	?= $(shell pkg-config luajit --libs)
-LUA_LIBDIR	?= $(PREFIX)/lib/lua/$(LUAV)
-endif
+#LUA_VERSION ?= $(shell pkg-config luajit --print-provides)
+#ifeq ($(LUA_VERSION),)                         ############ Not use luajit
+#LUAV		?= $(shell lua -e "_,_,v=string.find(_VERSION,'Lua (.+)');print(v)")
+#LUA_CFLAGS	?= -I$(PREFIX)/include/lua$(LUAV)
+#LUA_LIBS	?= -L$(PREFIX)/lib 
+#LUA_LIBDIR	?= $(PREFIX)/lib/lua/$(LUAV)
+#else
+#LUAV		?= $(shell lua -e "_,_,v=string.find(_VERSION,'Lua (.+)');print(v)")
+#LUA_CFLAGS	?= $(shell pkg-config luajit --cflags)
+#LUA_LIBS	?= $(shell pkg-config luajit --libs)
+#LUA_LIBDIR	?= $(PREFIX)/lib/lua/$(LUAV)
+#endif
+
+LUAV 		?=luajit-2.1
+LUA_CFLAGS 	?=-I$(PREFIX)/openresty/luajit/include/$(LUAV)
+LUA_LIBS 	?=-I$(PREFIX)/openresty/luajit/lib
+LUA_LIBDIR 	?=-I$(PREFIX)/openresty/lualib
 
 #OS auto detect
 SYS := $(shell gcc -dumpmachine)

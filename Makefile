@@ -20,7 +20,7 @@ LIB_OPTION	?= -shared
 LUAV 		?=luajit-2.1
 LUA_CFLAGS 	?=-I$(PREFIX)/openresty/luajit/include/$(LUAV)
 LUA_LIBS 	?=-L$(PREFIX)/openresty/luajit/lib
-LUA_LIBDIR 	?=-$(PREFIX)/openresty/lualib
+LUA_LIBDIR 	?=$(PREFIX)/openresty/lualib
 
 #OS auto detect
 SYS := $(shell gcc -dumpmachine)

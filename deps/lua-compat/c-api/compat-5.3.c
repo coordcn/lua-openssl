@@ -194,7 +194,7 @@ COMPAT53_API int luaL_len (lua_State *L, int i) {
   return res;
 }
 
-
+#if 0
 COMPAT53_API void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
   luaL_checkstack(L, nup+1, "too many upvalues");
   for (; l->name != NULL; l++) {  /* fill the table with given functions */
@@ -207,7 +207,7 @@ COMPAT53_API void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
   }
   lua_pop(L, nup);  /* remove upvalues */
 }
-
+#endif
 
 COMPAT53_API void luaL_setmetatable (lua_State *L, const char *tname) {
   luaL_checkstack(L, 1, "not enough stack slots");

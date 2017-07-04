@@ -143,7 +143,7 @@ COMPAT53_API int luaL_getsubtable (lua_State* L, int i, const char *name);
 COMPAT53_API int luaL_len (lua_State *L, int i);
 
 /*#define luaL_setfuncs COMPAT53_CONCAT(COMPAT53_PREFIX, L_setfuncs)*/
-COMPAT53_API void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup);
+/*COMPAT53_API void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup);*/
 
 #define luaL_setmetatable COMPAT53_CONCAT(COMPAT53_PREFIX, L_setmetatable)
 COMPAT53_API void luaL_setmetatable (lua_State *L, const char *tname);

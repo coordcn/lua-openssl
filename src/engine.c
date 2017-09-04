@@ -285,7 +285,7 @@ static int openssl_engine_ctrl(lua_State*L)
 static int openssl_engine_gc(lua_State*L)
 {
   ENGINE* eng = CHECK_OBJECT(1, ENGINE, "openssl.engine");
-  (void*) eng;
+  (void) eng;
   return 0;
 }
 
@@ -337,11 +337,11 @@ static int openssl_engine_flags(lua_State*L)
   lua_pushinteger(L, ENGINE_get_flags(eng));
   return 1;
 }
+
 /*
 int ENGINE_set_ex_data(ENGINE *e, int idx, void *arg);
 void *ENGINE_get_ex_data(const ENGINE *e, int idx);
 */
-
 static int openssl_engine_init(lua_State*L)
 {
   ENGINE* eng = CHECK_OBJECT(1, ENGINE, "openssl.engine");
@@ -350,7 +350,6 @@ static int openssl_engine_init(lua_State*L)
   return 1;
 }
 
-
 static int openssl_engine_finish(lua_State*L)
 {
   ENGINE* eng = CHECK_OBJECT(1, ENGINE, "openssl.engine");
@@ -358,7 +357,6 @@ static int openssl_engine_finish(lua_State*L)
   lua_pushboolean(L, ret);
   return 1;
 }
-
 
 static int openssl_engine_set_default(lua_State*L)
 {
@@ -380,8 +378,7 @@ static int openssl_engine_set_default(lua_State*L)
     }
     else
       luaL_error(L, "#2 must be a number or string");
-    lua_pushboolean(L, ret);
-    return 1;
+    return openssl_pushresult(L, ret);
   }
 
   while (first <= top)
@@ -430,12 +427,16 @@ static int openssl_engine_set_default(lua_State*L)
       return 1;
     }
   }
-  lua_pushboolean(L, ret);
-  return 1;
+  return openssl_pushresult(L, ret);
 };
 
-int openssl_engine_load_private_key(lua_State *L)
-{
+static int openssl_engine_set_rand_engine(lua_State *L) {
+  ENGINE* eng = CHECK_OBJECT(1, ENGINE, "openssl.engine");
+  int ret = RAND_set_rand_engine(eng);
+  return openssl_pushresult(L, ret);
+}
+
+static int openssl_engine_load_private_key(lua_State *L) {
   ENGINE* eng = CHECK_OBJECT(1, ENGINE, "openssl.engine");
   const char* key_id = luaL_checkstring(L, 2);
   EVP_PKEY *pkey = ENGINE_load_private_key(eng, key_id, NULL, NULL);
@@ -447,7 +448,7 @@ int openssl_engine_load_private_key(lua_State *L)
   return openssl_pushresult(L, 0);
 }
 
-int openssl_engine_load_public_key(lua_State *L)
+static int openssl_engine_load_public_key(lua_State *L)
 {
   ENGINE* eng = CHECK_OBJECT(1, ENGINE, "openssl.engine");
   const char* key_id = luaL_checkstring(L, 2);
@@ -460,7 +461,7 @@ int openssl_engine_load_public_key(lua_State *L)
   return openssl_pushresult(L, 0);
 }
 
-int openssl_engine_load_ssl_client_cert(lua_State *L)
+static int openssl_engine_load_ssl_client_cert(lua_State *L)
 {
   ENGINE* eng = CHECK_OBJECT(1, ENGINE, "openssl.engine");
   SSL* s = CHECK_OBJECT(2, SSL, "openssl.ssl");
@@ -490,6 +491,53 @@ int openssl_engine_load_ssl_client_cert(lua_State *L)
   return openssl_pushresult(L, 0);
 }
 
+struct _engine_exdata {
+  int l;
+  unsigned char p[1];
+};
+
+static int openssl_engine_ex_data(lua_State *L) {
+  ENGINE* eng = CHECK_OBJECT(1, ENGINE, "openssl.engine");
+  int idx;
+  int ret;
+  if (lua_isnoneornil(L, 2))
+  {
+    idx = ENGINE_get_ex_new_index(0, NULL, NULL, NULL, NULL);
+    if (idx == -1) {
+      lua_pushnil(L);
+      return 1;
+    }
+    lua_pushinteger(L, idx);
+    return 1;
+  }
+  idx = luaL_checkinteger(L, 2);
+  if (lua_isnoneornil(L, 3))
+  {
+    void *p = ENGINE_get_ex_data(eng, idx);
+    if (p) {
+      struct _engine_exdata *ex = p;
+      lua_pushlstring(L, (const char*)ex->p, ex->l);
+    }else
+      lua_pushnil(L);
+    return 1;
+  }
+  else {
+    size_t l;
+    const char *s = luaL_checklstring(L, 3, &l);
+    struct _engine_exdata *ex = OPENSSL_malloc(sizeof(struct _engine_exdata)+l);
+    ex->l = l;
+    memcpy(ex->p, s, l);
+    ret = ENGINE_set_ex_data(eng, idx, ex);
+    if (ret != 1) {
+      OPENSSL_free(ex);
+      lua_pushnil(L);
+    }
+    else
+      lua_pushboolean(L, 1);
+    return 1;
+  }
+}
+
 static luaL_Reg eng_funcs[] =
 {
   {"next",      openssl_engine_next},
@@ -502,6 +550,8 @@ static luaL_Reg eng_funcs[] =
   {"name",      openssl_engine_name},
   {"flags",     openssl_engine_flags},
 
+  {"ex_data",               openssl_engine_ex_data},
+  {"set_rand_engine",       openssl_engine_set_rand_engine},
   {"load_private_key",      openssl_engine_load_private_key},
   {"load_public_key",       openssl_engine_load_public_key },
   {"load_ssl_client_cert",  openssl_engine_load_ssl_client_cert},
@@ -515,7 +565,6 @@ static luaL_Reg eng_funcs[] =
 
   {NULL,      NULL},
 };
-
 
 int openssl_register_engine(lua_State* L)
 {

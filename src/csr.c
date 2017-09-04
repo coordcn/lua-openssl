@@ -21,12 +21,12 @@ static LUA_FUNCTION(openssl_csr_read)
   if (fmt == FORMAT_PEM)
   {
     csr = PEM_read_bio_X509_REQ(in, NULL, NULL, NULL);
-    BIO_reset(in);
+    (void)BIO_reset(in);
   }
   else if (fmt == FORMAT_DER)
   {
     csr = d2i_X509_REQ_bio(in, NULL);
-    BIO_reset(in);
+    (void)BIO_reset(in);
   }
   BIO_free(in);
 
@@ -38,13 +38,72 @@ static LUA_FUNCTION(openssl_csr_read)
   return openssl_pushresult(L, 0);
 }
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+static X509 *X509_REQ_to_X509_ex(X509_REQ *r, int days, EVP_PKEY *pkey, const EVP_MD* md)
+{
+  X509 *ret = NULL;
+  X509_CINF *xi = NULL;
+  X509_NAME *xn;
+  EVP_PKEY *pubkey = NULL;
+  int res;
+
+  if ((ret = X509_new()) == NULL) {
+    X509err(X509_F_X509_REQ_TO_X509, ERR_R_MALLOC_FAILURE);
+    return NULL;
+  }
+
+  /* duplicate the request */
+  xi = ret->cert_info;
+
+  if (sk_X509_ATTRIBUTE_num(r->req_info->attributes) != 0) {
+    if ((xi->version = M_ASN1_INTEGER_new()) == NULL)
+      goto err;
+    if (!ASN1_INTEGER_set(xi->version, 2))
+      goto err;
+    /*-     xi->extensions=ri->attributes; <- bad, should not ever be done
+    ri->attributes=NULL; */
+  }
+
+  xn = X509_REQ_get_subject_name(r);
+  if (X509_set_subject_name(ret, xn) == 0)
+    goto err;
+  if (X509_set_issuer_name(ret, xn) == 0)
+    goto err;
+
+  if (X509_gmtime_adj(xi->validity->notBefore, 0) == NULL)
+    goto err;
+  if (X509_gmtime_adj(xi->validity->notAfter, (long)60 * 60 * 24 * days) ==
+    NULL)
+    goto err;
+
+  pubkey = X509_REQ_get_pubkey(r);
+  res = X509_set_pubkey(ret, pubkey);
+  EVP_PKEY_free(pubkey);
+
+  if (!md)
+    goto err;
+  if (!res || !X509_sign(ret, pkey, md))
+    goto err;
+  if (0) {
+  err:
+    X509_free(ret);
+    ret = NULL;
+  }
+  return (ret);
+}
+#endif
 
 static LUA_FUNCTION(openssl_csr_to_x509)
 {
   X509_REQ * csr  = CHECK_OBJECT(1, X509_REQ, "openssl.x509_req");
   EVP_PKEY * pkey = CHECK_OBJECT(2, EVP_PKEY, "openssl.evp_pkey");
   int days = luaL_optint(L, 3, 365);
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+  const EVP_MD* md = get_digest(L, 4, "sha256");
+  X509* cert = X509_REQ_to_X509_ex(csr, days, pkey, md);
+#else
   X509* cert = X509_REQ_to_X509(csr, days, pkey);
+#endif
   if (cert)
   {
     PUSH_OBJECT(cert, "openssl.x509");
@@ -103,14 +162,10 @@ static LUA_FUNCTION(openssl_csr_export)
 static LUA_FUNCTION(openssl_csr_digest)
 {
   X509_REQ *csr = CHECK_OBJECT(1, X509_REQ, "openssl.x509_req");
-  const EVP_MD *md = NULL;
   unsigned char buf[EVP_MAX_MD_SIZE];
   unsigned int len = sizeof(buf);
   int ret;
-  if (lua_isnoneornil(L, 2))
-    md = EVP_get_digestbyname("SHA1");
-  else
-    md = get_digest(L, 2);
+  const EVP_MD *md = get_digest(L, 2, "sha256");
 
   ret = X509_REQ_digest(csr, md, buf, &len);
   if (ret == 1)
@@ -178,9 +233,9 @@ static LUA_FUNCTION(openssl_csr_new)
       pkey = CHECK_OBJECT(i, EVP_PKEY, "openssl.evp_pkey");
 
       if (i == n - 1)
-        md = get_digest(L, n);
+        md = get_digest(L, n, NULL);
       else
-        md = EVP_get_digestbyname("sha1");
+        md = EVP_get_digestbyname("sha256");
 
       ret = X509_REQ_set_pubkey(csr, pkey);
       if (ret == 1)
@@ -210,7 +265,7 @@ static LUA_FUNCTION(openssl_csr_sign)
   if (auxiliar_isclass(L, "openssl.evp_pkey", 2))
   {
     EVP_PKEY *pkey = CHECK_OBJECT(2, EVP_PKEY, "openssl.evp_pkey");
-    const EVP_MD* md = lua_isnone(L, 3) ? EVP_get_digestbyname("sha1") : get_digest(L, 3);
+    const EVP_MD* md = get_digest(L, 3, "sha256");
     int ret = 1;
     if (pubkey == NULL)
     {
@@ -242,17 +297,17 @@ static LUA_FUNCTION(openssl_csr_sign)
   {
     size_t siglen;
     unsigned char* sigdata = (unsigned char*)luaL_checklstring(L, 2, &siglen);
-    const EVP_MD* md = get_digest(L, 3);
+    const EVP_MD* md = get_digest(L, 3, NULL);
     ASN1_BIT_STRING *sig = NULL;
     X509_ALGOR *alg = NULL;
 
     luaL_argcheck(L, pubkey != NULL, 1, "has not set public key!!!");
 
-    X509_REQ_get0_signature(csr, &sig, &alg);
+    X509_REQ_get0_signature(csr, (const ASN1_BIT_STRING **)&sig, (const X509_ALGOR **)&alg);
     /* (pkey->ameth->pkey_flags & ASN1_PKEY_SIGPARAM_NULL) ? V_ASN1_NULL : V_ASN1_UNDEF, */
-    X509_ALGOR_set0(alg, OBJ_nid2obj(EVP_MD_pkey_type(md)), V_ASN1_NULL, NULL);
+    X509_ALGOR_set0((X509_ALGOR *)alg, OBJ_nid2obj(EVP_MD_pkey_type(md)), V_ASN1_NULL, NULL);
 
-    ASN1_BIT_STRING_set(sig, sigdata, siglen);
+    ASN1_BIT_STRING_set((ASN1_BIT_STRING *)sig, sigdata, siglen);
     /*
     * In the interests of compatibility, I'll make sure that the bit string
     * has a 'not-used bits' value of 0
@@ -287,14 +342,14 @@ static LUA_FUNCTION(openssl_csr_parse)
 
   lua_newtable(L);
   {
-    ASN1_BIT_STRING *sig = NULL;
-    X509_ALGOR *alg = NULL;
+    const ASN1_BIT_STRING *sig = NULL;
+    const X509_ALGOR *alg = NULL;
 
     X509_REQ_get0_signature(csr, &sig, &alg);
     openssl_push_asn1(L, sig, V_ASN1_BIT_STRING);
     lua_setfield(L, -2, "signature");
 
-    alg = X509_ALGOR_dup(alg);
+    alg = X509_ALGOR_dup((X509_ALGOR *)alg);
     PUSH_OBJECT(alg, "openssl.x509_algor");
     lua_setfield(L, -2, "sig_alg");
   }
@@ -425,7 +480,7 @@ static LUA_FUNCTION(openssl_csr_extensions)
   }
   else
   {
-    const STACK_OF(X509_EXTENSION) *sk = openssl_sk_x509_extension_fromtable(L, 2);
+    STACK_OF(X509_EXTENSION) *sk = openssl_sk_x509_extension_fromtable(L, 2);
     int ret = X509_REQ_add_extensions(csr, sk);
     sk_X509_EXTENSION_pop_free(sk, X509_EXTENSION_free);
     return openssl_pushresult(L, ret);

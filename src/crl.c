@@ -250,7 +250,7 @@ static LUA_FUNCTION(openssl_crl_new)
       luaL_argcheck(L, X509_check_private_key(cacert, capkey) == 1, 3, "evp_pkey not match with x509 in #2");
     }
   }
-  md = lua_isnoneornil(L, 4) ? EVP_get_digestbyname("sha1") : get_digest(L, 4);
+  md = get_digest(L, 4, "sha256");;
   step = lua_isnoneornil(L, 5) ? 7 * 24 * 3600 : luaL_checkint(L, 5);
 
   if (ret == 1)
@@ -303,12 +303,12 @@ static LUA_FUNCTION(openssl_crl_read)
   if (fmt == FORMAT_PEM)
   {
     crl = PEM_read_bio_X509_CRL(in, NULL, NULL, NULL);
-    BIO_reset(in);
+    (void)BIO_reset(in);
   }
   else if (fmt == FORMAT_DER)
   {
     crl = d2i_X509_CRL_bio(in, NULL);
-    BIO_reset(in);
+    (void)BIO_reset(in);
   }
   BIO_free(in);
   if (crl)
@@ -488,9 +488,7 @@ LUA_FUNCTION(openssl_crl_sign)
 {
   X509_CRL *crl = CHECK_OBJECT(1, X509_CRL, "openssl.x509_crl");
   EVP_PKEY *key = CHECK_OBJECT(2, EVP_PKEY, "openssl.evp_pkey");
-  const EVP_MD *md = lua_isnoneornil(L, 4)
-                     ? EVP_get_digestbyname("sha1") : get_digest(L, 4);
-
+  const EVP_MD *md = get_digest(L, 4, "sha256");
   int ret = 1;
 
   luaL_argcheck(L, auxiliar_isclass(L, "openssl.x509", 3) || auxiliar_isclass(L, "openssl.x509_name", 3),
@@ -525,8 +523,7 @@ static LUA_FUNCTION(openssl_crl_digest)
   X509_CRL *crl = CHECK_OBJECT(1, X509_CRL, "openssl.x509_crl");
   byte buf[EVP_MAX_MD_SIZE];
   unsigned int lbuf = sizeof(buf);
-  const EVP_MD *md = lua_isnoneornil(L, 2)
-                     ? EVP_get_digestbyname("sha1") : get_digest(L, 2);
+  const EVP_MD *md = get_digest(L, 2, "sha256");
 
   int ret =  X509_CRL_digest(crl, md, buf, &lbuf);
   if (ret == 1)
@@ -552,8 +549,7 @@ static LUA_FUNCTION(openssl_crl_diff)
   X509_CRL *crl = CHECK_OBJECT(1, X509_CRL, "openssl.x509_crl");
   X509_CRL *newer = CHECK_OBJECT(2, X509_CRL, "openssl.x509_crl");
   EVP_PKEY* pkey = CHECK_OBJECT(3, EVP_PKEY, "openssl.evp_pkey");
-  const EVP_MD *md = lua_isnoneornil(L, 4)
-                     ? EVP_get_digestbyname("sha1") : get_digest(L, 4);
+  const EVP_MD *md = get_digest(L, 4, "sha256");
   unsigned int flags = luaL_optinteger(L, 5, 0);
   X509_CRL *diff;
 
@@ -580,7 +576,7 @@ static LUA_FUNCTION(openssl_crl_parse)
 {
   X509_CRL *crl = CHECK_OBJECT(1, X509_CRL, "openssl.x509_crl");
   int num, i;
-  X509_ALGOR *alg;
+  const X509_ALGOR *alg;
 
   lua_newtable(L);
   AUXILIAR_SET(L, -1, "version", X509_CRL_get_version(crl), integer);
@@ -593,7 +589,7 @@ static LUA_FUNCTION(openssl_crl_parse)
   }
 
   {
-    const EVP_MD *digest = EVP_get_digestbyname("sha1");
+    const EVP_MD *digest = EVP_get_digestbyname("sha256");
     unsigned char md[EVP_MAX_MD_SIZE];
     unsigned int l = sizeof(md);
 
@@ -616,8 +612,8 @@ static LUA_FUNCTION(openssl_crl_parse)
   lua_setfield(L, -2, "nextUpdate");
 
   {
-    ASN1_BIT_STRING *sig = NULL;
-    X509_ALGOR *sig_alg = NULL;
+    const ASN1_BIT_STRING *sig = NULL;
+    const X509_ALGOR *sig_alg = NULL;
 
     X509_CRL_get0_signature(crl, &sig, &alg);
     PUSH_OBJECT(sig_alg, "openssl.x509_algor");

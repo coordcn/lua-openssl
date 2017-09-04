@@ -334,6 +334,7 @@ static LUA_FUNCTION(openssl_x509_public_key)
   }
 }
 
+#if 0
 static int verify_cb(int ok, X509_STORE_CTX *ctx)
 {
   int err;
@@ -365,6 +366,7 @@ static int verify_cb(int ok, X509_STORE_CTX *ctx)
     return 1;
   }
 }
+#endif
 
 static LUA_FUNCTION(openssl_x509_check)
 {
@@ -378,7 +380,7 @@ static LUA_FUNCTION(openssl_x509_check)
   else
   {
     X509_STORE* store = CHECK_OBJECT(2, X509_STORE, "openssl.x509_store");
-    STACK_OF(X509)* untrustedchain = lua_isnoneornil(L, 3) ?  NULL : (STACK_OF(X509)*)openssl_sk_x509_fromtable(L, 3);
+    STACK_OF(X509)* untrustedchain = lua_isnoneornil(L, 3) ?  NULL : openssl_sk_x509_fromtable(L, 3);
     int purpose = 0;
     int ret = 0;
     if (!lua_isnone(L, 4))
@@ -453,6 +455,7 @@ static LUA_FUNCTION(openssl_x509_check_ip_asc)
 
 IMP_LUA_SK(X509, x509)
 
+#if 0
 static STACK_OF(X509) * load_all_certs_from_file(BIO *in)
 {
   STACK_OF(X509) *stack = sk_X509_new_null();
@@ -480,6 +483,7 @@ static STACK_OF(X509) * load_all_certs_from_file(BIO *in)
   }
   return stack;
 };
+#endif
 
 static int openssl_x509_subject(lua_State* L)
 {
@@ -519,7 +523,7 @@ static int openssl_x509_digest(lua_State* L)
   unsigned char buffer[EVP_MAX_MD_SIZE];
   char hex_buffer[EVP_MAX_MD_SIZE * 2];
   X509 *cert = CHECK_OBJECT(1, X509, "openssl.x509");
-  const EVP_MD *digest = lua_isnoneornil(L, 2) ? EVP_sha1() : get_digest(L, 2);
+  const EVP_MD *digest = get_digest(L, 2, "sha256");
   int ret;
   if (!digest)
   {
@@ -872,9 +876,7 @@ static int openssl_x509_sign(lua_State*L)
 
     if (ret == 1)
     {
-      md = lua_isnoneornil(L, i) ?
-           EVP_get_digestbyname("sha1") :
-           get_digest(L, i);
+      md = get_digest(L, i, "sha256");
       ret = X509_sign(x, pkey, md);
       if (ret > 0)
         ret = 1;

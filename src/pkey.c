@@ -156,7 +156,7 @@ static int openssl_pkey_read(lua_State*L)
         break;
       }
       }
-      BIO_reset(in);
+      (void)BIO_reset(in);
     }
     else if (fmt == FORMAT_DER)
     {
@@ -220,7 +220,7 @@ static int openssl_pkey_read(lua_State*L)
         key = d2i_PUBKEY_bio(in, NULL);
         break;
       }
-      BIO_reset(in);
+      (void)BIO_reset(in);
     }
   }
   else
@@ -228,7 +228,7 @@ static int openssl_pkey_read(lua_State*L)
     if (fmt == FORMAT_PEM)
     {
       key = PEM_read_bio_PrivateKey(in, NULL, NULL, (void*)passphrase);
-      BIO_reset(in);
+      (void)BIO_reset(in);
     }
     else if (fmt == FORMAT_DER)
     {
@@ -282,7 +282,7 @@ static int openssl_pkey_read(lua_State*L)
         break;
       }
       }
-      BIO_reset(in);
+      (void)BIO_reset(in);
     }
   }
   BIO_free(in);
@@ -377,10 +377,11 @@ static LUA_FUNCTION(openssl_pkey_new)
 
     if (strcasecmp(alg, "rsa") == 0)
     {
-      int bits = luaL_optint(L, 2, 1024);
+      int bits = luaL_optint(L, 2, 2048);
       int e = luaL_optint(L, 3, 65537);
-      RSA* rsa = RSA_new();
-
+      ENGINE *eng = lua_isnoneornil(L, 4) ? NULL : CHECK_OBJECT(4, ENGINE, "openssl.engine");
+      
+      RSA *rsa = eng ? RSA_new_method(eng) : RSA_new();
       BIGNUM *E = BN_new();
       BN_set_word(E, e);
       if (RSA_generate_key_ex(rsa, bits, E, NULL))
@@ -397,8 +398,9 @@ static LUA_FUNCTION(openssl_pkey_new)
       int bits = luaL_optint(L, 2, 1024);
       size_t seed_len = 0;
       const char* seed = luaL_optlstring(L, 3, NULL, &seed_len);
+      ENGINE *eng = lua_isnoneornil(L, 4) ? NULL : CHECK_OBJECT(4, ENGINE, "openssl.engine");
 
-      DSA *dsa = DSA_new();
+      DSA *dsa = eng ? DSA_new_method(eng) : DSA_new();
       if (DSA_generate_parameters_ex(dsa, bits, (byte*)seed, seed_len, NULL, NULL, NULL)
           && DSA_generate_key(dsa))
       {
@@ -410,10 +412,11 @@ static LUA_FUNCTION(openssl_pkey_new)
     }
     else if (strcasecmp(alg, "dh") == 0)
     {
-      int bits = luaL_optint(L, 2, 512);
+      int bits = luaL_optint(L, 2, 1024);
       int generator = luaL_optint(L, 3, 2);
+      ENGINE *eng = lua_isnoneornil(L, 4) ? NULL : CHECK_OBJECT(4, ENGINE, "openssl.engine");
 
-      DH* dh = DH_new();
+      DH* dh = eng ? DH_new_method(eng) : DH_new();
       if (DH_generate_parameters_ex(dh, bits, generator, NULL))
       {
         if (DH_generate_key(dh))
@@ -1131,58 +1134,44 @@ static LUA_FUNCTION(openssl_sign)
   size_t data_len;
   EVP_PKEY *pkey = CHECK_OBJECT(1, EVP_PKEY, "openssl.evp_pkey");
   const char * data = luaL_checklstring(L, 2, &data_len);
-  int top = lua_gettop(L);
+  int ret = 0;
+  EVP_MD_CTX *ctx = NULL;
 
-  const EVP_MD *mdtype = NULL;
-  if (top > 2)
+  const EVP_MD *md = get_digest(L, 3, "sha256");
+  ctx = EVP_MD_CTX_create();
+  ret = EVP_DigestSignInit(ctx, NULL, md, NULL, pkey);
+  if (ret == 1)
   {
-    mdtype = get_digest(L, 3);
-  }
-  else
-    mdtype = EVP_get_digestbyname("sha1");
-  if (mdtype)
-  {
-    int ret = 0;
-    EVP_MD_CTX *ctx = EVP_MD_CTX_create();
-
-    ret = EVP_DigestSignInit(ctx, NULL, mdtype, NULL, pkey);
+    ret = EVP_DigestSignUpdate(ctx, data, data_len);
     if (ret == 1)
     {
-      ret = EVP_DigestSignUpdate(ctx, data, data_len);
+      size_t siglen = 0;
+      unsigned char *sigbuf = NULL;
+      ret = EVP_DigestSignFinal(ctx, NULL, &siglen);
       if (ret == 1)
       {
-        size_t siglen = 0;
-        unsigned char *sigbuf = NULL;
-        ret = EVP_DigestSignFinal(ctx, NULL, &siglen);
+        siglen += 2;
+        sigbuf = OPENSSL_malloc(siglen);
+        ret = EVP_DigestSignFinal(ctx, sigbuf, &siglen);
         if (ret == 1)
         {
-          siglen += 2;
-          sigbuf = OPENSSL_malloc(siglen);
-          ret = EVP_DigestSignFinal(ctx, sigbuf, &siglen);
-          if (ret == 1)
-          {
-            lua_pushlstring(L, (char *)sigbuf, siglen);
-          }
-          else
-            ret = openssl_pushresult(L, ret);
-          OPENSSL_free(sigbuf);
+          lua_pushlstring(L, (char *)sigbuf, siglen);
         }
         else
           ret = openssl_pushresult(L, ret);
+        OPENSSL_free(sigbuf);
       }
       else
         ret = openssl_pushresult(L, ret);
     }
     else
       ret = openssl_pushresult(L, ret);
-
-    EVP_MD_CTX_destroy(ctx);
-    return ret;
   }
   else
-    luaL_argerror(L, 3, "Not support digest alg");
+    ret = openssl_pushresult(L, ret);
 
-  return 0;
+  EVP_MD_CTX_destroy(ctx);
+  return ret;
 }
 
 static LUA_FUNCTION(openssl_verify)
@@ -1191,46 +1180,31 @@ static LUA_FUNCTION(openssl_verify)
   EVP_PKEY *pkey = CHECK_OBJECT(1, EVP_PKEY, "openssl.evp_pkey");
   const char* data = luaL_checklstring(L, 2, &data_len);
   const char* signature = luaL_checklstring(L, 3, &signature_len);
-  const EVP_MD *mdtype = NULL;
-  int top = lua_gettop(L);
-  if (top > 3)
-  {
-    mdtype = get_digest(L, 4);
-  }
-  else
-    mdtype = EVP_get_digestbyname("sha1");
-  if (mdtype)
-  {
-    int ret;
-    EVP_MD_CTX *ctx = EVP_MD_CTX_create();
+  const EVP_MD *md = get_digest(L, 4, "sha256");
+  EVP_MD_CTX *ctx = EVP_MD_CTX_create();
 
-    ret = EVP_DigestVerifyInit(ctx, NULL, mdtype, NULL, pkey);
+  int ret = EVP_DigestVerifyInit(ctx, NULL, md, NULL, pkey);
+  if (ret == 1)
+  {
+    ret = EVP_DigestVerifyUpdate(ctx, data, data_len);
     if (ret == 1)
     {
-      ret = EVP_DigestVerifyUpdate(ctx, data, data_len);
+      ret = EVP_DigestVerifyFinal(ctx, (unsigned char *)signature, signature_len);
       if (ret == 1)
       {
-        ret = EVP_DigestVerifyFinal(ctx, (unsigned char *)signature, signature_len);
-        if (ret == 1)
-        {
-          lua_pushboolean(L, ret == 1);
-        }
-        else
-          ret = openssl_pushresult(L, ret);
+        lua_pushboolean(L, ret == 1);
       }
       else
         ret = openssl_pushresult(L, ret);
     }
     else
       ret = openssl_pushresult(L, ret);
-
-    EVP_MD_CTX_destroy(ctx);
-    return ret;
   }
   else
-    luaL_argerror(L, 4, "Not support digest alg");
+    ret = openssl_pushresult(L, ret);
 
-  return 0;
+  EVP_MD_CTX_destroy(ctx);
+  return ret;
 }
 
 static LUA_FUNCTION(openssl_seal)

@@ -74,7 +74,7 @@ static LUA_FUNCTION(openssl_base64)
     BIO_push(b64, out);
     BIO_get_mem_ptr(inp, &mem);
     BIO_write(b64, mem->data, mem->length);
-    BIO_flush(b64);
+    (void)BIO_flush(b64);
   }
   else
   {
@@ -83,7 +83,7 @@ static LUA_FUNCTION(openssl_base64)
     BIO_push(b64, inp);
     while ((inlen = BIO_read(b64, inbuf, 512)) > 0)
       BIO_write(out, inbuf, inlen);
-    BIO_flush(out);
+    (void)BIO_flush(out);
   }
 
   BIO_get_mem_ptr(out, &mem);
@@ -189,12 +189,11 @@ static int openssl_random_write(lua_State *L)
 {
   const char *file = luaL_optstring(L, 1, NULL);
   char buffer[MAX_PATH];
-  int n;
 
   if (file == NULL && (file = RAND_file_name(buffer, sizeof buffer)) == NULL)
     return openssl_pushresult(L, 0);
 
-  n = RAND_write_file(file);
+  RAND_write_file(file);
   return openssl_pushresult(L, 1);
 }
 
@@ -315,7 +314,9 @@ LUALIB_API int luaopen_openssl(lua_State*L)
     LOAD_ENGINE_CUSTOM
 #endif
 #ifdef OPENSSL_SYS_WINDOWS
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     RAND_screen();
+#endif
 #endif
     init = 1;
   }
